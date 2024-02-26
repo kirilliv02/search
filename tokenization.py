@@ -21,7 +21,7 @@ def extract_text_from_html(htmls):
     texts = []
     for html in htmls:
         soup = BeautifulSoup(html, 'html.parser')
-        text = soup.get_text()
+        text = soup.get_text(" ")
         texts.append(text)
     return texts
 
@@ -29,7 +29,7 @@ def extract_text_from_html(htmls):
 def divide_into_words(texts):
     words = set()
     for text in texts:
-        word_pattern = re.compile(r'\b[а-яА-Я]+\b')
+        word_pattern = re.compile(r'\b[а-яА-Я]{3,}\b')
         words.update(word_pattern.findall(text))
     return words
 
