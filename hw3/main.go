@@ -24,32 +24,27 @@ func getInvertedIndex() map[string][]int {
 	return termDocumentsDict
 }
 
-func booleanSearch(query string, invertedIndex map[string][]int) []int {
+func booleanSearch(query []string, invertedIndex map[string][]int) []int {
 
-	fields := strings.Split(query, " ")
-	res := make([]int, 0)
-	operator := ""
-	for _, field := range fields {
+	res := make([][]int, 0)
+	for _, field := range query {
 		if field == "AND" || field == "NOT" || field == "OR" {
-			operator = field
-			continue
-		}
-
-		if len(res) == 0 {
-			res = invertedIndex[field]
-		} else {
-			switch operator {
+			first := res[len(res)-2]
+			second := res[len(res)-1]
+			switch field {
 			case "AND":
-				res = and(res, invertedIndex[field])
+				res[len(res)-2] = and(first, second)
 			case "OR":
-				res = or(res, invertedIndex[field])
+				res[len(res)-2] = or(first, second)
 			case "NOT":
-				res = not(res, invertedIndex[field])
+				res[len(res)-2] = not(first, second)
 			}
+			res = res[:len(res)-1]
+		} else {
+			res = append(res, invertedIndex[field])
 		}
-
 	}
-	return res
+	return res[0]
 }
 
 func and(a, b []int) []int {
@@ -153,16 +148,78 @@ func createIndexes() {
 	}
 }
 
+func infixToPostfix(infix []string) []string {
+	var scobs = 0
+	var result []string
+	var signs []string
+	for _, r := range infix {
+		if r == "(" {
+			scobs++
+		} else if r == ")" {
+			result = append(result, signs[len(signs)-1])
+			signs = signs[:len(signs)-1]
+			scobs--
+		} else if r == "AND" || r == "OR" || r == "NOT" {
+			if len(signs) > 0 {
+				if scobs == 0 {
+					result = append(result, signs[len(signs)-1])
+					signs[len(signs)-1] = r
+				} else {
+					signs = append(signs, r)
+				}
+
+			} else {
+				signs = append(signs, r)
+			}
+		} else {
+			result = append(result, r)
+		}
+	}
+
+	for len(signs) > 0 {
+		result = append(result, signs[len(signs)-1])
+		signs = signs[:len(signs)-1]
+	}
+
+	return result
+}
+
 func main() {
 	//createIndexes()
-
 	tdDict := getInvertedIndex()
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Введите запрос: ")
 	query, _ := reader.ReadString('\n')
 	query = strings.TrimSpace(query)
+	fileds := strings.Fields(query)
 
-	searchResults := booleanSearch(query, tdDict)
+	res := make([]string, 0, len(fileds))
+
+	for _, filed := range fileds {
+		if filed[0] == '(' {
+			for strings.Contains(filed, "(") {
+				res = append(res, "(")
+				filed = filed[1:]
+			}
+			res = append(res, filed)
+
+		} else if filed[len(filed)-1] == ')' {
+			count := 0
+			for strings.Contains(filed, ")") {
+				count++
+				filed = filed[:len(filed)-1]
+			}
+			res = append(res, filed)
+			for i := 0; i < count; i++ {
+				res = append(res, ")")
+
+			}
+		} else {
+			res = append(res, filed)
+		}
+	}
+
+	searchResults := booleanSearch(infixToPostfix(res), tdDict)
 	fmt.Println("Результаты поиска:")
 	fmt.Println(searchResults)
 }
