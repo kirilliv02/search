@@ -2,140 +2,193 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
-	"math"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/blevesearch/bleve/v2"
+	"github.com/blevesearch/bleve/v2/search/query"
 )
 
-// var invertedIdx = getInvertedIndex()
-var tfIdfDictsLemmas, idfLemmas = getTFTerms()
+var (
+	globalIndexToPositions map[string][]int
+	indexPositionToURL     map[int]string
+)
 
-func vectorNorm(vec []float64) float64 {
-	sum := 0.0
-	for _, el := range vec {
-		sum += math.Pow(el, 2)
-	}
-	return math.Pow(sum, 0.5)
+func main() {
+	//var query = "установить NOT освещённость" // освещённость OR установить
+	var query string
+	fmt.Scanln(&query)
+	modifiedSearch(query)
 }
 
-func getIndex() map[int]string {
-	index := make(map[int]string)
+func modifiedSearch(queryExpr string) {
+	splittedQuery := strings.Split(queryExpr, " ")
 
-	file, err := os.Open("index.txt")
+	var q query.Query
+	if len(splittedQuery) > 1 {
+		var prevQuery query.Query
+		prevQuery = bleve.NewMatchPhraseQuery(splittedQuery[0])
+
+		for i := 1; i < len(splittedQuery); i++ {
+
+			if i%2 != 0 {
+				switch splittedQuery[i] {
+				case "AND":
+					if i+1 == len(splittedQuery) {
+						break
+					}
+					nextKeyWord := splittedQuery[i+1]
+					subQuery := bleve.NewMatchPhraseQuery(nextKeyWord)
+					prevQuery = bleve.NewConjunctionQuery(prevQuery, subQuery)
+
+					i++
+					continue
+				case "OR":
+					if i+1 == len(splittedQuery) {
+						break
+					}
+					nextKeyWord := splittedQuery[i+1]
+					subQuery := bleve.NewMatchPhraseQuery(nextKeyWord)
+					prevQuery = bleve.NewDisjunctionQuery(prevQuery, subQuery)
+
+					i++
+					continue
+				case "NOT":
+					if i+1 == len(splittedQuery) {
+						break
+					}
+					nextKeyWord := splittedQuery[i+1]
+					subQuery := bleve.NewMatchPhraseQuery(nextKeyWord)
+					tempQuery := bleve.NewBooleanQuery()
+					tempQuery.AddMust(prevQuery)
+					tempQuery.AddMustNot(subQuery)
+					prevQuery = tempQuery
+
+					i++
+					continue
+				default:
+					panic(fmt.Errorf("должен быть логический оператор между поисковыми словами"))
+				}
+			}
+		}
+
+		q = prevQuery
+	} else {
+		q = bleve.NewMatchPhraseQuery(queryExpr)
+	}
+
+	cleanAfteward()
+
+	tree := readIndex()
+	search := bleve.NewSearchRequest(q)
+	// Параметр отвечающий за то сколько сущностей вернется в ответе
+	//search.Size = 10
+
+	res, err := tree.Search(search)
 	if err != nil {
-		fmt.Println(err)
-		return index
+		panic(err)
+	}
+
+	foundedIndexes := make(map[int]int)
+	for _, val := range res.Hits {
+		for _, num := range globalIndexToPositions[val.ID] {
+			foundedIndexes[num]++
+		}
+	}
+
+	idx := 0
+	for indexPosition, _ := range foundedIndexes {
+		idx++
+		url := indexPositionToURL[indexPosition]
+		fmt.Println(idx, "Подходящий сайт: ", url)
+	}
+
+	cleanAfteward()
+
+	//fmt.Println(parsed)
+	//fmt.Println(tree)
+}
+
+type Index struct {
+	Count         int    `json:"count"`
+	InvertedArray []int  `json:"inverted_array"`
+	Word          string `json:"word"`
+}
+
+func cleanAfteward() {
+	os.RemoveAll("./index-helper")
+}
+
+func readIndex() bleve.Index {
+	//fieldMapping :=bleve.NewKeywordFieldMapping()
+	mapping := bleve.NewIndexMapping()
+
+	index, err := bleve.New("./index-helper", mapping)
+	if err != nil {
+		panic(err)
+	}
+	batch := index.NewBatch()
+
+	file, err := os.Open("inverted_index_2.txt")
+	if err != nil {
+		fmt.Println("Ошибка при открытии файла:", err)
+		panic(err)
 	}
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	idx := 0
+	globalIndexToPositions = make(map[string][]int, 10_000)
 	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Split(line, " ")
-		if len(parts) >= 2 {
-			key, err := strconv.Atoi(parts[0])
+		idx++
+		lineBytes := scanner.Bytes()
+		body := Index{}
+		err = json.Unmarshal(lineBytes, &body)
+		if err != nil {
+			panic(err)
+		}
+
+		if idx%100 == 0 {
+			err = index.Batch(batch)
 			if err != nil {
-				fmt.Println(err)
-				continue
+				panic(err)
 			}
-			value := parts[1]
-			index[key] = value
+			batch.Reset()
+		}
+
+		globalIndexToPositions[strconv.Itoa(idx)] = body.InvertedArray
+		err = batch.Index(strconv.Itoa(idx), body)
+		if err != nil {
+			panic(err)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Println(err)
+		fmt.Println("Ошибка при сканировании файла:", err)
+	}
+
+	indexPositionToURL = make(map[int]string, 101)
+	file2, err := os.Open("index.txt")
+	if err != nil {
+		fmt.Println("Ошибка при открытии файла:", err)
+		panic(err)
+	}
+	defer file2.Close()
+
+	scanner2 := bufio.NewScanner(file2)
+	for scanner2.Scan() {
+		line := scanner2.Text()
+		splitted := strings.Split(line, " ")
+
+		num, err := strconv.Atoi(splitted[0])
+		if err != nil {
+			panic(err)
+		}
+		indexPositionToURL[num] = splitted[1]
 	}
 
 	return index
-}
-
-func calculate(term string, documentTokensList []string, documentsCount, documentsWithTermCount int) (float64, float64, float64) {
-	tf := float64(strings.Count(strings.Join(documentTokensList, " "), term)) / float64(len(documentTokensList))
-	var idf float64
-	if documentsWithTermCount == 0 {
-		idf = 0
-	} else {
-		idf = math.Log(float64(documentsCount) / float64(documentsWithTermCount))
-	}
-	return math.Round(tf*1000000) / 1000000, math.Round(idf*1000000) / 1000000, math.Round(tf*idf*1000000) / 1000000
-}
-
-func cosineSimilarity(vec1, vec2 []float64) float64 {
-	dot := 0.0
-	for i := 0; i < len(vec1); i++ {
-		dot += vec1[i] * vec2[i]
-	}
-	if dot == 0 {
-		return 0
-	}
-	return dot / (vectorNorm(vec1) * vectorNorm(vec2))
-}
-
-func search(query string) {
-	fmt.Printf("SEARCHING: %s\n", query)
-	tokensMap := getLemmas(getTokens(query))
-
-	// Конвертируем значения из карты в срез строк
-	var tokens []string
-	for _, v := range tokensMap {
-		tokens = append(tokens, v...)
-	}
-
-	indexDict := getIndex()
-	if len(tokens) == 0 {
-		fmt.Println("Empty query")
-		return
-	}
-	fmt.Printf("LEMMATIZED: %s\n", strings.Join(tokens, " "))
-
-	queryVector := make([]float64, 0)
-	for _, token := range tokens {
-		docWithTermsCount := 0
-		for _, tfIdfDict := range tfIdfDictsLemmas {
-			if _, ok := tfIdfDict[token]; ok {
-				docWithTermsCount++
-			}
-		}
-		_, _, tfIdf := calculate(token, tokens, COUNT_DOCUMENTS, docWithTermsCount)
-		queryVector = append(queryVector, tfIdf)
-	}
-
-	distances := make(map[int]float64)
-	for index := 0; index < COUNT_DOCUMENTS; index++ {
-		documentVector := make([]float64, 0)
-		for _, token := range tokens {
-			if tfIdfDict, ok := tfIdfDictsLemmas[index][token]; ok {
-				documentVector = append(documentVector, tfIdfDict)
-			} else {
-				documentVector = append(documentVector, 0.0)
-			}
-		}
-		distances[index] = cosineSimilarity(queryVector, documentVector)
-	}
-
-	searchedIndices := make([]int, 0)
-	for index := range distances {
-		searchedIndices = append(searchedIndices, index)
-	}
-	sort.Slice(searchedIndices, func(i, j int) bool {
-		return distances[searchedIndices[i]] > distances[searchedIndices[j]]
-	})
-
-	for _, index := range searchedIndices {
-		tfIdf := distances[index]
-		if tfIdf < 0.05 {
-			continue
-		}
-		fmt.Printf("Index: %d \n Link: %s \n Cosine: %f \n", index, indexDict[index], tfIdf)
-	}
-}
-
-func main() {
-	var query string
-	fmt.Scanln(&query)
-	search(query)
 }
