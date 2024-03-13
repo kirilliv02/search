@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<head>
+    <title>Results</title>
+</head>
+<style>
+    .link {
+        margin-left: 10%;
+        margin-right: auto;
+        margin-bottom: 15px;
+    }
+</style>
+<body>
+
+    {{if .Results}}
+    <ol>
+    {{range $i, $row :=.Results}}
+        <li class="link"><a href="url">{{$row.Url}}</a></li>
+    {{end}}
+    </ol>
+    {{else}}
+    <p>Вот сейчас не получилось найти, то что нужно :(</p>
+    {{end}}
+
+</body>
+</html>

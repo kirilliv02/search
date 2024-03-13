@@ -10,27 +10,51 @@ import (
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/search/query"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/template/html/v2"
 )
 
 var (
 	globalIndexToPositions map[string][]int
 	indexPositionToURL     map[int]string
+	tree                   bleve.Index
 )
 
 func main() {
-	//var query = "установить NOT освещённость" // освещённость OR установить
-	var query string
-	fmt.Scanln(&query)
-	modifiedSearch(query)
+	cleanAfteward()
+	defer cleanAfteward()
+	tree = readIndex()
+
+	engine := html.New("./demo/templates", ".html")
+	app := fiber.New(fiber.Config{
+		Views: engine,
+	})
+
+	// Обработчик для отдачи страницы с формой
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.Render("index", fiber.Map{})
+	})
+
+	// Обработчик для обработки данных формы
+	app.Post("/submit", func(c *fiber.Ctx) error {
+		data := c.FormValue("data")
+		results := modifiedSearch(data)
+		return c.Render("results", fiber.Map{
+			"Results": results,
+		})
+	})
+
+	app.Listen(":8080")
+
 }
 
-func modifiedSearch(queryExpr string) {
-	fmt.Println([]byte(queryExpr))
-	splittedQuery := strings.Split(queryExpr, " ")
+type Result struct {
+	Url string
+}
 
-	for _, val := range splittedQuery {
-		fmt.Println([]byte(val))
-	}
+func modifiedSearch(queryExpr string) []Result {
+	queryExpr = strings.ToLower(queryExpr)
+	splittedQuery := strings.Split(queryExpr, " ")
 
 	var q query.Query
 	if len(splittedQuery) > 1 {
@@ -41,7 +65,7 @@ func modifiedSearch(queryExpr string) {
 
 			if i%2 != 0 {
 				switch splittedQuery[i] {
-				case "AND":
+				case "and":
 					if i+1 == len(splittedQuery) {
 						break
 					}
@@ -51,7 +75,7 @@ func modifiedSearch(queryExpr string) {
 
 					i++
 					continue
-				case "OR":
+				case "or":
 					if i+1 == len(splittedQuery) {
 						break
 					}
@@ -61,7 +85,7 @@ func modifiedSearch(queryExpr string) {
 
 					i++
 					continue
-				case "NOT":
+				case "not":
 					if i+1 == len(splittedQuery) {
 						break
 					}
@@ -85,9 +109,6 @@ func modifiedSearch(queryExpr string) {
 		q = bleve.NewMatchPhraseQuery(queryExpr)
 	}
 
-	cleanAfteward()
-
-	tree := readIndex()
 	search := bleve.NewSearchRequest(q)
 	// Параметр отвечающий за то сколько сущностей вернется в ответе
 	//search.Size = 10
@@ -105,16 +126,16 @@ func modifiedSearch(queryExpr string) {
 	}
 
 	idx := 0
+	resp := make([]Result, 0, len(foundedIndexes))
 	for indexPosition, _ := range foundedIndexes {
 		idx++
-		url := indexPositionToURL[indexPosition]
-		fmt.Println(idx, "Подходящий сайт: ", url)
+		resp = append(resp, Result{Url: indexPositionToURL[indexPosition]})
 	}
-
-	cleanAfteward()
 
 	//fmt.Println(parsed)
 	//fmt.Println(tree)
+
+	return resp
 }
 
 type Index struct {
