@@ -28,10 +28,6 @@ func modifiedSearch(queryExpr string) {
 	fmt.Println([]byte(queryExpr))
 	splittedQuery := strings.Split(queryExpr, " ")
 
-	for _, val := range splittedQuery {
-		fmt.Println([]byte(val))
-	}
-
 	var q query.Query
 	if len(splittedQuery) > 1 {
 		var prevQuery query.Query
