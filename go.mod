@@ -1,6 +1,6 @@
 module search
 
-go 1.21.3
+go 1.22.0
 
 require (
 	github.com/PuerkitoBio/goquery v1.9.1
@@ -48,6 +48,7 @@ require (
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	go.etcd.io/bbolt v1.3.7 // indirect
+	golang.org/x/exp v0.0.0-20240318143956-a85f2c67cd81 // indirect
 	golang.org/x/net v0.21.0 // indirect
 	golang.org/x/sys v0.17.0 // indirect
 )

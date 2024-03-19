@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/blevesearch/bleve/v2"
-	"github.com/blevesearch/bleve/v2/search/query"
 )
 
 var (
@@ -18,69 +18,23 @@ var (
 )
 
 func main() {
-	//var query = "установить NOT освещённость" // освещённость OR установить
-	var query string
-	fmt.Scanln(&query)
+	fmt.Println("Введите запрос:")
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Scan()
+	query := sc.Text()
+
+	//var query = "автомасло поддержка"
 	modifiedSearch(query)
+
+}
+
+type entityForSort struct {
+	weight int
+	index  int
 }
 
 func modifiedSearch(queryExpr string) {
-	fmt.Println([]byte(queryExpr))
-	splittedQuery := strings.Split(queryExpr, " ")
-
-	var q query.Query
-	if len(splittedQuery) > 1 {
-		var prevQuery query.Query
-		prevQuery = bleve.NewMatchPhraseQuery(splittedQuery[0])
-
-		for i := 1; i < len(splittedQuery); i++ {
-
-			if i%2 != 0 {
-				switch splittedQuery[i] {
-				case "AND":
-					if i+1 == len(splittedQuery) {
-						break
-					}
-					nextKeyWord := splittedQuery[i+1]
-					subQuery := bleve.NewMatchPhraseQuery(nextKeyWord)
-					prevQuery = bleve.NewConjunctionQuery(prevQuery, subQuery)
-
-					i++
-					continue
-				case "OR":
-					if i+1 == len(splittedQuery) {
-						break
-					}
-					nextKeyWord := splittedQuery[i+1]
-					subQuery := bleve.NewMatchPhraseQuery(nextKeyWord)
-					prevQuery = bleve.NewDisjunctionQuery(prevQuery, subQuery)
-
-					i++
-					continue
-				case "NOT":
-					if i+1 == len(splittedQuery) {
-						break
-					}
-					nextKeyWord := splittedQuery[i+1]
-					subQuery := bleve.NewMatchPhraseQuery(nextKeyWord)
-					tempQuery := bleve.NewBooleanQuery()
-					tempQuery.AddMust(prevQuery)
-					tempQuery.AddMustNot(subQuery)
-					prevQuery = tempQuery
-
-					i++
-					continue
-				default:
-					panic(fmt.Errorf("должен быть логический оператор между поисковыми словами"))
-				}
-			}
-		}
-
-		q = prevQuery
-	} else {
-		q = bleve.NewMatchPhraseQuery(queryExpr)
-	}
-
+	q := bleve.NewMatchQuery(queryExpr) //NewQueryStringQuery(queryExpr)
 	cleanAfteward()
 
 	tree := readIndex()
@@ -100,10 +54,21 @@ func modifiedSearch(queryExpr string) {
 		}
 	}
 
+	sortedFoundedIndexes := make([]entityForSort, 0, len(foundedIndexes))
+	for indexPosition, weight := range foundedIndexes {
+		sortedFoundedIndexes = append(sortedFoundedIndexes, entityForSort{
+			weight: weight,
+			index:  indexPosition,
+		})
+	}
+
+	sort.SliceStable(sortedFoundedIndexes, func(i, j int) bool {
+		return sortedFoundedIndexes[i].weight > sortedFoundedIndexes[j].weight
+	})
 	idx := 0
-	for indexPosition, _ := range foundedIndexes {
+	for _, val := range sortedFoundedIndexes {
 		idx++
-		url := indexPositionToURL[indexPosition]
+		url := indexPositionToURL[val.index]
 		fmt.Println(idx, "Подходящий сайт: ", url)
 	}
 
