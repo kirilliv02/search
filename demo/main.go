@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/blevesearch/bleve/v2"
-	"github.com/blevesearch/bleve/v2/search/query"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/template/html/v2"
 )
@@ -45,69 +45,19 @@ func main() {
 	})
 
 	app.Listen(":8080")
-
 }
 
 type Result struct {
 	Url string
 }
 
+type entityForSort struct {
+	weight int
+	index  int
+}
+
 func modifiedSearch(queryExpr string) []Result {
-	queryExpr = strings.ToLower(queryExpr)
-	splittedQuery := strings.Split(queryExpr, " ")
-
-	var q query.Query
-	if len(splittedQuery) > 1 {
-		var prevQuery query.Query
-		prevQuery = bleve.NewMatchPhraseQuery(splittedQuery[0])
-
-		for i := 1; i < len(splittedQuery); i++ {
-
-			if i%2 != 0 {
-				switch splittedQuery[i] {
-				case "and":
-					if i+1 == len(splittedQuery) {
-						break
-					}
-					nextKeyWord := splittedQuery[i+1]
-					subQuery := bleve.NewMatchPhraseQuery(nextKeyWord)
-					prevQuery = bleve.NewConjunctionQuery(prevQuery, subQuery)
-
-					i++
-					continue
-				case "or":
-					if i+1 == len(splittedQuery) {
-						break
-					}
-					nextKeyWord := splittedQuery[i+1]
-					subQuery := bleve.NewMatchPhraseQuery(nextKeyWord)
-					prevQuery = bleve.NewDisjunctionQuery(prevQuery, subQuery)
-
-					i++
-					continue
-				case "not":
-					if i+1 == len(splittedQuery) {
-						break
-					}
-					nextKeyWord := splittedQuery[i+1]
-					subQuery := bleve.NewMatchPhraseQuery(nextKeyWord)
-					tempQuery := bleve.NewBooleanQuery()
-					tempQuery.AddMust(prevQuery)
-					tempQuery.AddMustNot(subQuery)
-					prevQuery = tempQuery
-
-					i++
-					continue
-				default:
-					panic(fmt.Errorf("должен быть логический оператор между поисковыми словами"))
-				}
-			}
-		}
-
-		q = prevQuery
-	} else {
-		q = bleve.NewMatchPhraseQuery(queryExpr)
-	}
+	q := bleve.NewMatchQuery(queryExpr)
 
 	search := bleve.NewSearchRequest(q)
 	// Параметр отвечающий за то сколько сущностей вернется в ответе
@@ -125,15 +75,23 @@ func modifiedSearch(queryExpr string) []Result {
 		}
 	}
 
-	idx := 0
 	resp := make([]Result, 0, len(foundedIndexes))
-	for indexPosition, _ := range foundedIndexes {
-		idx++
-		resp = append(resp, Result{Url: indexPositionToURL[indexPosition]})
+	sortedFoundedIndexes := make([]entityForSort, 0, len(foundedIndexes))
+	for indexPosition, weight := range foundedIndexes {
+		sortedFoundedIndexes = append(sortedFoundedIndexes, entityForSort{
+			weight: weight,
+			index:  indexPosition,
+		})
 	}
 
-	//fmt.Println(parsed)
-	//fmt.Println(tree)
+	sort.SliceStable(sortedFoundedIndexes, func(i, j int) bool {
+		return sortedFoundedIndexes[i].weight > sortedFoundedIndexes[j].weight
+	})
+	idx := 0
+	for _, val := range sortedFoundedIndexes {
+		idx++
+		resp = append(resp, Result{Url: indexPositionToURL[val.index]})
+	}
 
 	return resp
 }
